@@ -1,0 +1,237 @@
+import sys
+import os
+import tkinter as tk
+from tkinter import filedialog, messagebox, scrolledtext, ttk
+from ttkthemes import ThemedTk
+import fnmatch
+
+class FileCheckerApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Data Package Validator")
+        self.root.geometry("900x700")
+
+        self.root.set_theme("breeze")
+
+        # Set application icon (robust to installation path)
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        icon_path = os.path.join(base_dir, "assets", "icon.ico")
+        if os.path.exists(icon_path):
+            try:
+                icon_image = tk.PhotoImage(file=icon_path)
+                self.root.iconphoto(True, icon_image)
+            except Exception as e:
+                print(f"Failed to set icon: {e}")
+        else:
+            print("Icon file not found, continuing without custom icon.")
+
+        self.config_path = ""
+        self.folder_path = ""
+        self.last_config_file = os.path.join(os.path.expanduser("~"), ".last_config_path.txt")
+
+        # Notebook for tabs
+        self.notebook = ttk.Notebook(self.root)
+        self.compare_tab = ttk.Frame(self.notebook)
+        self.edit_tab = ttk.Frame(self.notebook)
+
+        self.notebook.add(self.compare_tab, text="🔍 Compare Files")
+        self.notebook.add(self.edit_tab, text="📝 Edit Config")
+        self.notebook.pack(expand=1, fill="both", padx=10, pady=10)
+
+        self.create_compare_tab()
+        self.create_edit_tab()
+        self.try_load_last_config()
+
+    def create_compare_tab(self):
+        top_frame = ttk.Frame(self.compare_tab)
+        top_frame.pack(pady=10)
+
+        ttk.Button(top_frame, text="📂 Load Config File", command=self.load_config_file).grid(row=0, column=0, padx=2)
+        ttk.Button(top_frame, text="📁 Select Folder", command=self.select_folder).grid(row=0, column=1, padx=2)
+        ttk.Button(top_frame, text="🔄 Compare", command=self.compare_files).grid(row=0, column=2, padx=2)
+
+        self.config_label = ttk.Label(self.compare_tab, text="No config file selected", foreground="#0066cc", wraplength=800)
+        self.config_label.pack(pady=5)
+
+        self.folder_label = ttk.Label(self.compare_tab, text="No folder selected", foreground="#339966", wraplength=800)
+        self.folder_label.pack(pady=5)
+
+        self.output = scrolledtext.ScrolledText(self.compare_tab, wrap=tk.WORD, width=100, height=30, font=("Consolas", 10))
+        self.output.pack(padx=10, pady=10)
+
+    def create_edit_tab(self):
+        top_frame = ttk.Frame(self.edit_tab)
+        top_frame.pack(pady=10)
+
+        ttk.Button(top_frame, text="📂 Open Config File", command=self.load_config_file).grid(row=0, column=0, padx=2)
+        ttk.Button(top_frame, text="💾 Save Changes", command=self.save_config_edits).grid(row=0, column=1, padx=2)
+
+        self.editor = scrolledtext.ScrolledText(self.edit_tab, wrap=tk.WORD, width=100, height=35, font=("Consolas", 10))
+        self.editor.pack(padx=5, pady=5)
+
+    def load_config_file(self):
+        path = filedialog.askopenfilename(title="Select Configuration File", filetypes=[("Text Files", "*.txt")])
+        if path:
+            self.config_path = path
+            self.config_label.config(text=f"📄 Config File: {path}")
+            self.folder_label.config(text="")  # Clear any previous folder message
+            self.load_config_into_editor()
+
+            # Save the path for next launch
+            try:
+                with open(self.last_config_file, 'w') as f:
+                    f.write(self.config_path)
+            except Exception as e:
+                print(f"Warning: Failed to save last config path: {e}")
+
+    def try_load_last_config(self):
+        if os.path.exists(self.last_config_file):
+            try:
+                with open(self.last_config_file, 'r') as f:
+                    last_path = f.read().strip()
+                if os.path.exists(last_path):
+                    self.config_path = last_path
+                    self.config_label.config(text=f"📄 Config File: {last_path}")
+                    self.load_config_into_editor()
+            except Exception as e:
+                print(f"Warning: Failed to load last config path: {e}")
+
+    def load_config_into_editor(self):
+        if not self.config_path:
+            return
+        with open(self.config_path, 'r') as f:
+            content = f.read()
+            self.editor.delete(1.0, tk.END)
+            self.editor.insert(tk.END, content)
+
+    def select_folder(self):
+        path = filedialog.askdirectory(title="Select Folder to Check")
+        if path:
+            self.folder_path = path
+            self.folder_label.config(text=f"📁 Folder: {path}")
+
+    def compare_files(self):
+        self.output.delete(1.0, tk.END)
+
+        if not self.config_path or not self.folder_path:
+            messagebox.showerror("Error", "Please load a config file and select a folder.")
+            return
+
+        expected_files = set()
+        forbidden_items = set()
+        ignore_dirs = set()
+        pass_dirs = set()
+        current_section = None
+
+        with open(self.config_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("#"):
+                    if "# --- FILES" in line:
+                        current_section = "FILES"
+                    elif "# --- FORBIDDEN" in line:
+                        current_section = "FORBIDDEN"
+                    elif "# --- IGNORE" in line:
+                        current_section = "IGNORE"
+                    elif "# --- PASS" in line:
+                        current_section = "PASS"
+                    continue
+                if not line:
+                    continue
+                if current_section == "FILES":
+                    expected_files.add(line.replace("\\", "/"))
+                elif current_section == "FORBIDDEN":
+                    forbidden_items.add(line)
+                elif current_section == "IGNORE":
+                    ignore_dirs.add(line.rstrip("/\\") + "/")
+                elif current_section == "PASS":
+                    pass_dirs.add(line.rstrip("/\\") + "/")
+
+        actual_files = set()
+        forbidden_violations = []
+        all_actual_files = set()
+        empty_dirs = []
+
+        for dirpath, dirnames, filenames in os.walk(self.folder_path):
+            rel_dir = os.path.relpath(dirpath, self.folder_path).replace("\\", "/")
+            if rel_dir != "." and any(rel_dir.startswith(ignored) for ignored in ignore_dirs):
+                continue
+
+            rel_dir_with_slash = rel_dir + "/" if rel_dir != "." else ""
+
+            is_ignored_or_passed = any(rel_dir_with_slash.startswith(d) for d in ignore_dirs | pass_dirs)
+            compare_files = not any(rel_dir_with_slash.startswith(p) for p in pass_dirs)
+
+            rel_files = []
+
+            for filename in filenames:
+                rel_path = os.path.relpath(os.path.join(dirpath, filename), self.folder_path).replace("\\", "/")
+                rel_files.append(filename)
+
+                if compare_files:
+                    for forbidden in forbidden_items:
+                        if forbidden in filename:
+                            forbidden_violations.append((rel_path, forbidden))
+                            break
+
+                    for expected in expected_files:
+                        if fnmatch.fnmatch(rel_path, expected):
+                            actual_files.add(rel_path)
+                            break
+
+                    all_actual_files.add(rel_path)
+
+            if not filenames and not dirnames:
+                if not any(rel_dir_with_slash.startswith(d) for d in ignore_dirs | pass_dirs):
+                    empty_dirs.append(rel_dir)
+
+        matched_expected = set()
+        for expected in expected_files:
+            if any(fnmatch.fnmatch(actual, expected) for actual in actual_files):
+                matched_expected.add(expected)
+
+        missing_files = expected_files - matched_expected
+        unexpected_files = all_actual_files - actual_files
+
+        if not missing_files and not unexpected_files and not forbidden_violations and not empty_dirs:
+            self.output.insert(tk.END, "✅ All expected files are present. No forbidden terms or empty folders found.\n")
+        else:
+            if missing_files:
+                self.output.insert(tk.END, "❌ Missing Files:\n")
+                for file in sorted(missing_files):
+                    self.output.insert(tk.END, f"  - {file}\n")
+
+            if unexpected_files:
+                self.output.insert(tk.END, "\n⚠️ Extra/Unexpected Files:\n")
+                for file in sorted(unexpected_files):
+                    self.output.insert(tk.END, f"  - {file}\n")
+
+            if forbidden_violations:
+                self.output.insert(tk.END, "\n🚫 Forbidden Terms Found in Filenames:\n")
+                for file, term in forbidden_violations:
+                    self.output.insert(tk.END, f"  - {file} (contains '{term}')\n")
+
+            if empty_dirs:
+                self.output.insert(tk.END, "\n📁 Empty Directories Found:\n")
+                for d in sorted(empty_dirs):
+                    self.output.insert(tk.END, f"  - {d}\n")
+
+    def save_config_edits(self):
+        if not self.config_path:
+            messagebox.showerror("Error", "No config file loaded.")
+            return
+
+        content = self.editor.get(1.0, tk.END).strip()
+
+        try:
+            with open(self.config_path, 'w') as f:
+                f.write(content)
+            messagebox.showinfo("Saved", "Config file saved successfully.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not save file:\n{str(e)}")
+
+
+if __name__ == "__main__":
+    root = ThemedTk(theme="aquativo")
+    app = FileCheckerApp(root)
+    root.mainloop()
