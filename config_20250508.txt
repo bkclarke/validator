@@ -75,11 +75,9 @@ tsg/raw/*.cnv
 tsg/raw/*.hdr
 tsg/raw/*.hex
 tsg/raw/*.xmlcon
-tsg/programfiles/*.psa
 tsg/procontrol/DatCnv_EN.psa
 tsg/proc/*.cnv
 tsg/tsg_readme_*
-
 
 #scs
 scs/docs/*_acquisition.log
@@ -143,6 +141,7 @@ draft
 DRAFT
 Draft
 
+
 # --- IGNORE ---
 #ignored directories will not be checked for forbidden files
 adcp/
@@ -159,3 +158,7 @@ echo/raw/
 tsg/docs/calibrations/
 tsg/programfiles/
 scs/Raw/
+tsg/programfiles/
+
+# --- EXTENSIONS
+.DS_Store

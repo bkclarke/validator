@@ -13,7 +13,6 @@ class FileCheckerApp:
 
         self.root.set_theme("breeze")
 
-        # Set application icon (robust to installation path)
         base_dir = os.path.dirname(os.path.abspath(__file__))
         icon_path = os.path.join(base_dir, "assets", "icon.ico")
         if os.path.exists(icon_path):
@@ -29,7 +28,6 @@ class FileCheckerApp:
         self.folder_path = ""
         self.last_config_file = os.path.join(os.path.expanduser("~"), ".last_config_path.txt")
 
-        # Notebook for tabs
         self.notebook = ttk.Notebook(self.root)
         self.compare_tab = ttk.Frame(self.notebook)
         self.edit_tab = ttk.Frame(self.notebook)
@@ -74,10 +72,8 @@ class FileCheckerApp:
         if path:
             self.config_path = path
             self.config_label.config(text=f"📄 Config File: {path}")
-            self.folder_label.config(text="")  # Clear any previous folder message
+            self.folder_label.config(text="")
             self.load_config_into_editor()
-
-            # Save the path for next launch
             try:
                 with open(self.last_config_file, 'w') as f:
                     f.write(self.config_path)
@@ -121,6 +117,7 @@ class FileCheckerApp:
         forbidden_items = set()
         ignore_dirs = set()
         pass_dirs = set()
+        forbidden_extensions = set()
         current_section = None
 
         with open(self.config_path, 'r') as f:
@@ -135,6 +132,8 @@ class FileCheckerApp:
                         current_section = "IGNORE"
                     elif "# --- PASS" in line:
                         current_section = "PASS"
+                    elif "# --- EXTENSIONS" in line:
+                        current_section = "EXTENSIONS"
                     continue
                 if not line:
                     continue
@@ -146,43 +145,44 @@ class FileCheckerApp:
                     ignore_dirs.add(line.rstrip("/\\") + "/")
                 elif current_section == "PASS":
                     pass_dirs.add(line.rstrip("/\\") + "/")
+                elif current_section == "EXTENSIONS":
+                    forbidden_extensions.add(line.strip())
 
         actual_files = set()
         forbidden_violations = []
+        extension_violations = []
         all_actual_files = set()
         empty_dirs = []
 
         for dirpath, dirnames, filenames in os.walk(self.folder_path):
             rel_dir = os.path.relpath(dirpath, self.folder_path).replace("\\", "/")
-            if rel_dir != "." and any(rel_dir.startswith(ignored) for ignored in ignore_dirs):
-                continue
-
             rel_dir_with_slash = rel_dir + "/" if rel_dir != "." else ""
+
+            if any(rel_dir_with_slash == ignored or rel_dir_with_slash.startswith(ignored) for ignored in ignore_dirs):
+                continue
 
             is_ignored_or_passed = any(rel_dir_with_slash.startswith(d) for d in ignore_dirs | pass_dirs)
             compare_files = not any(rel_dir_with_slash.startswith(p) for p in pass_dirs)
 
-            rel_files = []
-
             for filename in filenames:
                 rel_path = os.path.relpath(os.path.join(dirpath, filename), self.folder_path).replace("\\", "/")
-                rel_files.append(filename)
 
                 if compare_files:
-                    for forbidden in forbidden_items:
-                        if forbidden in filename:
-                            forbidden_violations.append((rel_path, forbidden))
-                            break
+                    if any(forbidden in filename for forbidden in forbidden_items):
+                        forbidden_violations.append((rel_path, [f for f in forbidden_items if f in filename]))
 
-                    for expected in expected_files:
-                        if fnmatch.fnmatch(rel_path, expected):
-                            actual_files.add(rel_path)
-                            break
+                    if any(fnmatch.fnmatch(rel_path, expected) for expected in expected_files):
+                        actual_files.add(rel_path)
 
-                    all_actual_files.add(rel_path)
+                    if any(filename.endswith(ext) for ext in forbidden_extensions):
+                        extension_violations.append((rel_path, [ext for ext in forbidden_extensions if filename.endswith(ext)]))
+
+                if is_ignored_or_passed:
+                    continue
+                all_actual_files.add(rel_path)
 
             if not filenames and not dirnames:
-                if not any(rel_dir_with_slash.startswith(d) for d in ignore_dirs | pass_dirs):
+                if not is_ignored_or_passed:
                     empty_dirs.append(rel_dir)
 
         matched_expected = set()
@@ -193,8 +193,8 @@ class FileCheckerApp:
         missing_files = expected_files - matched_expected
         unexpected_files = all_actual_files - actual_files
 
-        if not missing_files and not unexpected_files and not forbidden_violations and not empty_dirs:
-            self.output.insert(tk.END, "✅ All expected files are present. No forbidden terms or empty folders found.\n")
+        if not missing_files and not unexpected_files and not forbidden_violations and not extension_violations and not empty_dirs:
+            self.output.insert(tk.END, "✅ All expected files are present. No forbidden terms, forbidden extensions, or empty folders found.\n")
         else:
             if missing_files:
                 self.output.insert(tk.END, "❌ Missing Files:\n")
@@ -208,8 +208,15 @@ class FileCheckerApp:
 
             if forbidden_violations:
                 self.output.insert(tk.END, "\n🚫 Forbidden Terms Found in Filenames:\n")
-                for file, term in forbidden_violations:
-                    self.output.insert(tk.END, f"  - {file} (contains '{term}')\n")
+                for file, terms in forbidden_violations:
+                    for term in terms:
+                        self.output.insert(tk.END, f"  - {file} (contains '{term}')\n")
+
+            if extension_violations:
+                self.output.insert(tk.END, "\n🚫 Forbidden Extensions Found:\n")
+                for file, exts in extension_violations:
+                    for ext in exts:
+                        self.output.insert(tk.END, f"  - {file} (ends with '{ext}')\n")
 
             if empty_dirs:
                 self.output.insert(tk.END, "\n📁 Empty Directories Found:\n")
@@ -235,3 +242,4 @@ if __name__ == "__main__":
     root = ThemedTk(theme="aquativo")
     app = FileCheckerApp(root)
     root.mainloop()
+
