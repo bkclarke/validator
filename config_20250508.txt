@@ -21,6 +21,10 @@ ctd/docs/CTD_deck_checklist_*
 ctd/docs/SBE11plus_0427_settings_*
 ctd/ctd_readme_*
 
+#core
+core/core_readme_*
+core/docs/MC-800InstructionAndOperationManualMulticore.pdf
+
 #docs
 docs/personnel_list_MFP_*
 docs/r2r_readme_*
